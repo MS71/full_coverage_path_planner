@@ -79,7 +79,7 @@ if(BUILD_TESTING)
 
   find_package(ament_cmake_gtest REQUIRED)
 
-  ament_add_gtest(${PROJECT_NAME}-test test/src/test_spiral_stc.cpp test/src/test_common.cpp src/spiral_stc.cpp src/common.cpp test/src/util.cpp )
+  ament_add_gtest(${PROJECT_NAME}-test test/src/test_spiral_stc.cpp test/src/test_common.cpp test/src/test_2d.cpp src/spiral_stc.cpp src/full_coverage_path_planner.cpp src/navfn.cpp src/common.cpp test/src/util.cpp )
 
 #    catkin_add_gtest(test_spiral_stc test/src/test_spiral_stc.cpp test/src/util.cpp src/spiral_stc.cpp src/common.cpp src/${PROJECT_NAME}.cpp)
 #    add_dependencies(test_spiral_stc ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
@@ -87,11 +87,26 @@ if(BUILD_TESTING)
 
     find_package(OpenCV)
     include_directories(${OpenCV_INCLUDE_DIRS})
-    ament_target_dependencies(${PROJECT_NAME}-test rclcpp nav2_util rclcpp_lifecycle)
+    ament_target_dependencies(${PROJECT_NAME}-test rclcpp nav2_util rclcpp_lifecycle nav2_costmap_2d)
     target_link_libraries(${PROJECT_NAME}-test ${OpenCV_LIBRARIES} ${catkin_LIBRARIES})
 
 
     #add_rostest(test/${PROJECT_NAME}/test_${PROJECT_NAME}.test)
+    
+#    ament_add_test(test_full_coverage_path_planner
+#      GENERATE_RESULT_FOR_RETURN_CODE_ZERO
+#      COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/test/full_coverage_path_planner/test_full_coverage_path_planner_launch.py"
+#      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/test/full_coverage_path_planner"
+#      TIMEOUT 180
+#      ENV
+#        TEST_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+#        TEST_MAP=${PROJECT_SOURCE_DIR}/maps/map_circular.yaml
+#        TEST_WORLD=${PROJECT_SOURCE_DIR}/worlds/turtlebot3_ros2_demo.world
+#        GAZEBO_MODEL_PATH=${PROJECT_SOURCE_DIR}/models
+#        BT_NAVIGATOR_XML=navigate_w_replanning_and_recovery.xml
+#        ASTAR=False
+#    )
+
 endif()
 
 ament_export_include_directories(include)

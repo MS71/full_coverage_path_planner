@@ -27,7 +27,7 @@ using std::string;
 
 namespace full_coverage_path_planner
 {
-class SpiralSTC : private full_coverage_path_planner::FullCoveragePathPlanner
+class SpiralSTC : public full_coverage_path_planner::FullCoveragePathPlanner
 {
 public:
   /**
