@@ -1,0 +1,5 @@
+<library path="full_coverage_path_planner">
+	<class name="full_coverage_path_planner/FullCoveragePathPlanner" type="full_coverage_path_planner::FullCoveragePathPlanner" base_class_type="nav2_core::GlobalPlanner">
+	  <description></description>
+	</class>
+</library>
