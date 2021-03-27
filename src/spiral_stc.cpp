@@ -7,11 +7,16 @@
 #include <string>
 #include <vector>
 
+#include "rclcpp/rclcpp.hpp"
+#include "nav2_util/node_utils.hpp"
+
 #include "full_coverage_path_planner/spiral_stc.h"
 //#include <pluginlib/class_list_macros.h>
 
 // register this planner as a GlobalPlanner plugin
 //PLUGINLIB_EXPORT_CLASS(full_coverage_path_planner::SpiralSTC, nav2_core::GlobalPlanner)
+
+using nav2_util::declare_parameter_if_not_declared;
 
 namespace full_coverage_path_planner
 {
@@ -29,9 +34,16 @@ void SpiralSTC::initialize(std::string name, nav2_costmap_2d::Costmap2DROS* cost
     // Try to request the cpp-grid from the cpp_grid map_server
     //TODO cpp_grid_client_ = nh.serviceClient<nav_msgs::GetMap>("static_map");
 
+    declare_parameter_if_not_declared(node_, name + ".robot_radius", rclcpp::ParameterValue(0.5));
+    node_->get_parameter(name + ".robot_radius", robot_radius_);
+
+    declare_parameter_if_not_declared(node_, name + ".tool_radius_", rclcpp::ParameterValue(0.5));
+    node_->get_parameter(name + ".tool_radius", tool_radius_);
+
     // Define  robot radius (radius) parameter
     //TODO float robot_radius_default = 0.5f;
     //TODO private_named_nh.param<float>("robot_radius", robot_radius_, robot_radius_default);
+    
     // Define  tool radius (radius) parameter
     //TODO float tool_radius_default = 0.5f;
     //TODO private_named_nh.param<float>("tool_radius", tool_radius_, tool_radius_default);
@@ -133,7 +145,7 @@ std::list<Point_t> SpiralSTC::spiral_stc(std::vector<std::vector<bool> > const& 
   visited[y][x] = eNodeVisited;
 
 #ifdef DEBUG_PLOT
-  ROS_INFO("Grid before walking is: ");
+  RCLCPP_INFO(node_->get_logger(),"Grid before walking is: ");
   printGrid(grid, visited, fullPath);
 #endif
 
@@ -151,9 +163,9 @@ std::list<Point_t> SpiralSTC::spiral_stc(std::vector<std::vector<bool> > const& 
   pathNodes.erase(pathNodes.begin(), --(pathNodes.end()));
 
 #ifdef DEBUG_PLOT
-  ROS_INFO("Current grid after first spiral is");
+  RCLCPP_INFO(node_->get_logger(),"Current grid after first spiral is");
   printGrid(grid, visited, fullPath);
-  ROS_INFO("There are %d goals remaining", goals.size());
+  RCLCPP_INFO(node_->get_logger(),"There are %d goals remaining", goals.size());
 #endif
   while (goals.size() != 0)
   {
@@ -168,7 +180,7 @@ std::list<Point_t> SpiralSTC::spiral_stc(std::vector<std::vector<bool> > const& 
     if (resign)
     {
 #ifdef DEBUG_PLOT
-      ROS_INFO("A_star_to_open_space is resigning", goals.size());
+      RCLCPP_INFO(node_->get_logger(),"A_star_to_open_space is resigning", goals.size());
 #endif
       break;
     }
@@ -188,7 +200,7 @@ std::list<Point_t> SpiralSTC::spiral_stc(std::vector<std::vector<bool> > const& 
     }
 
 #ifdef DEBUG_PLOT
-    ROS_INFO("Grid with path marked as visited is:");
+    RCLCPP_INFO(node_->get_logger(),"Grid with path marked as visited is:");
     gridNode_t SpiralStart = pathNodes.back();
     printGrid(grid, visited, pathNodes, pathNodes.front(), pathNodes.back());
 #endif
@@ -197,7 +209,7 @@ std::list<Point_t> SpiralSTC::spiral_stc(std::vector<std::vector<bool> > const& 
     pathNodes = spiral(grid, pathNodes, visited);
 
 #ifdef DEBUG_PLOT
-    ROS_INFO("Visited grid updated after spiral:");
+    RCLCPP_INFO(node_->get_logger(),"Visited grid updated after spiral:");
     printGrid(grid, visited, pathNodes, SpiralStart, pathNodes.back());
 #endif
 
@@ -221,12 +233,12 @@ bool SpiralSTC::makePlan(const geometry_msgs::PoseStamped& start, const geometry
 {
   if (!initialized_)
   {
-    ROS_ERROR("This planner has not been initialized yet, but it is being used, please call initialize() before use");
+    RCLCPP_ERROR(node_->get_logger(),"This planner has not been initialized yet, but it is being used, please call initialize() before use");
     return false;
   }
   else
   {
-    ROS_INFO("Initialized!");
+    RCLCPP_INFO(node_->get_logger(),"Initialized!");
   }
 
   clock_t begin = clock();
@@ -235,17 +247,17 @@ bool SpiralSTC::makePlan(const geometry_msgs::PoseStamped& start, const geometry
   /********************** Get grid from server **********************/
   std::vector<std::vector<bool> > grid;
   nav_msgs::GetMap grid_req_srv;
-  ROS_INFO("Requesting grid!!");
+  RCLCPP_INFO(node_->get_logger(),"Requesting grid!!");
 #if 0
   if (!cpp_grid_client_.call(grid_req_srv))
   {
-    ROS_ERROR("Could not retrieve grid from map_server");
+    RCLCPP_ERROR(node_->get_logger(),"Could not retrieve grid from map_server");
     return false;
   }
 
   if (!parseGrid(grid_req_srv.response.map, grid, robot_radius_ * 2, tool_radius_ * 2, start, startPoint))
   {
-    ROS_ERROR("Could not parse retrieved grid");
+    RCLCPP_ERROR(node_->get_logger(),"Could not parse retrieved grid");
     return false;
   }
 #endif
@@ -254,7 +266,7 @@ bool SpiralSTC::makePlan(const geometry_msgs::PoseStamped& start, const geometry
     (void)plan;
 
 #ifdef DEBUG_PLOT
-  ROS_INFO("Start grid is:");
+  RCLCPP_INFO(node_->get_logger(),"Start grid is:");
   std::list<Point_t> printPath;
   printPath.push_back(startPoint);
   printGrid(grid, grid, printPath);
@@ -264,26 +276,26 @@ bool SpiralSTC::makePlan(const geometry_msgs::PoseStamped& start, const geometry
                                               startPoint,
                                               spiral_cpp_metrics_.multiple_pass_counter,
                                               spiral_cpp_metrics_.visited_counter);
-  ROS_INFO("naive cpp completed!");
-  ROS_INFO("Converting path to plan");
+  RCLCPP_INFO(node_->get_logger(),"naive cpp completed!");
+  RCLCPP_INFO(node_->get_logger(),"Converting path to plan");
 
   //parsePointlist2Plan(start, goalPoints, plan);
   // Print some metrics:
   spiral_cpp_metrics_.accessible_counter = spiral_cpp_metrics_.visited_counter
                                             - spiral_cpp_metrics_.multiple_pass_counter;
   spiral_cpp_metrics_.total_area_covered = (4.0 * tool_radius_ * tool_radius_) * spiral_cpp_metrics_.accessible_counter;
-  ROS_INFO("Total visited: %d", spiral_cpp_metrics_.visited_counter);
-  ROS_INFO("Total re-visited: %d", spiral_cpp_metrics_.multiple_pass_counter);
-  ROS_INFO("Total accessible cells: %d", spiral_cpp_metrics_.accessible_counter);
-  ROS_INFO("Total accessible area: %f", spiral_cpp_metrics_.total_area_covered);
+  RCLCPP_INFO(node_->get_logger(),"Total visited: %d", spiral_cpp_metrics_.visited_counter);
+  RCLCPP_INFO(node_->get_logger(),"Total re-visited: %d", spiral_cpp_metrics_.multiple_pass_counter);
+  RCLCPP_INFO(node_->get_logger(),"Total accessible cells: %d", spiral_cpp_metrics_.accessible_counter);
+  RCLCPP_INFO(node_->get_logger(),"Total accessible area: %f", spiral_cpp_metrics_.total_area_covered);
 
   // TODO(CesarLopez): Check if global path should be calculated repetitively or just kept
   // (also controlled by planner_frequency parameter in move_base namespace)
 
-  ROS_INFO("Publishing plan!");
+  RCLCPP_INFO(node_->get_logger(),"Publishing plan!");
 //  publishPlan(plan);
-  ROS_INFO("Plan published!");
-  ROS_DEBUG("Plan published");
+  RCLCPP_INFO(node_->get_logger(),"Plan published!");
+  RCLCPP_DEBUG(node_->get_logger(),"Plan published");
 
   clock_t end = clock();
   double elapsed_secs = static_cast<double>(end - begin) / CLOCKS_PER_SEC;

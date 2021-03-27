@@ -63,6 +63,7 @@ Unit test that checks the basis spiral algorithm for full coverage. The test is 
 #### test_full_coverage_path_planner.test
 ROS system test that checks the full coverage path planner together with a tracking pid. A simulation is run such that a robot moves to fully cover the accessible cells in a given map.
 
+* colcon test --packages-select full_coverage_path_planner --event-handlers console_cohesion+
 
 ## Usage
 

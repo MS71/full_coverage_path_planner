@@ -22,6 +22,7 @@ nav2_package()
 
 include_directories(
   include
+  test/include
 )
 
 set(library_name full_coverage_path_planner)
@@ -31,7 +32,7 @@ set(dependencies
   rclcpp_action
   rclcpp_lifecycle
   std_msgs
-  visualization_msgs
+  visualization_msgs  
   nav2_util
   nav2_msgs
   nav_msgs
@@ -73,8 +74,24 @@ install(FILES global_planner_plugin.xml
 )
 
 if(BUILD_TESTING)
-  find_package(ament_lint_auto REQUIRED)
-  ament_lint_auto_find_test_dependencies()
+  #find_package(ament_lint_auto REQUIRED)
+  #ament_lint_auto_find_test_dependencies()
+
+  find_package(ament_cmake_gtest REQUIRED)
+
+  ament_add_gtest(${PROJECT_NAME}-test test/src/test_spiral_stc.cpp test/src/test_common.cpp src/spiral_stc.cpp src/common.cpp test/src/util.cpp )
+
+#    catkin_add_gtest(test_spiral_stc test/src/test_spiral_stc.cpp test/src/util.cpp src/spiral_stc.cpp src/common.cpp src/${PROJECT_NAME}.cpp)
+#    add_dependencies(test_spiral_stc ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+#    target_link_libraries(test_spiral_stc ${catkin_LIBRARIES})
+
+    find_package(OpenCV)
+    include_directories(${OpenCV_INCLUDE_DIRS})
+    ament_target_dependencies(${PROJECT_NAME}-test rclcpp nav2_util rclcpp_lifecycle)
+    target_link_libraries(${PROJECT_NAME}-test ${OpenCV_LIBRARIES} ${catkin_LIBRARIES})
+
+
+#    add_rostest(test/${PROJECT_NAME}/test_${PROJECT_NAME}.test)
 endif()
 
 ament_export_include_directories(include)
