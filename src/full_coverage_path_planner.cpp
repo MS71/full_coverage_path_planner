@@ -1,243 +1,474 @@
+// Copyright (c) 2018 Intel Corporation
+// Copyright (c) 2018 Simbe Robotics
+// Copyright (c) 2019 Samsung Research America
 //
-// Copyright [2020] Nobleo Technology"  [legal/copyright]
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
-#include <list>
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Navigation Strategy based on:
+// Brock, O. and Oussama K. (1999). High-Speed Navigation Using
+// the Global Dynamic Window Approach. IEEE.
+// https://cs.stanford.edu/group/manips/publications/pdfs/Brock_1999_ICRA.pdf
+
+// #define BENCHMARK_TESTING
+
+#include "full_coverage_path_planner/full_coverage_path_planner.hpp"
+
+#include <chrono>
+#include <cmath>
+#include <iomanip>
+#include <iostream>
+#include <limits>
+#include <memory>
+#include <string>
 #include <vector>
 
-#include "full_coverage_path_planner/full_coverage_path_planner.h"
+#include "builtin_interfaces/msg/duration.hpp"
+#include "full_coverage_path_planner/navfn.hpp"
+#include "nav2_util/costmap.hpp"
+#include "nav2_util/node_utils.hpp"
+#include "nav2_costmap_2d/cost_values.hpp"
 
-/*  *** Note the coordinate system ***
- *  grid[][] is a 2D-vector:
- *  where ix is column-index and x-coordinate in map,
- *  iy is row-index and y-coordinate in map.
- *
- *            Cols  [ix]
- *        _______________________
- *       |__|__|__|__|__|__|__|__|
- *       |__|__|__|__|__|__|__|__|
- * Rows  |__|__|__|__|__|__|__|__|
- * [iy]  |__|__|__|__|__|__|__|__|
- *       |__|__|__|__|__|__|__|__|
- *y-axis |__|__|__|__|__|__|__|__|
- *   ^   |__|__|__|__|__|__|__|__|
- *   ^   |__|__|__|__|__|__|__|__|
- *   |   |__|__|__|__|__|__|__|__|
- *   |   |__|__|__|__|__|__|__|__|
- *
- *   O   --->> x-axis
- */
+using namespace std::chrono_literals;
+using nav2_util::declare_parameter_if_not_declared;
 
-// #define DEBUG_PLOT
-
-// Default Constructor
 namespace full_coverage_path_planner
 {
-FullCoveragePathPlanner::FullCoveragePathPlanner() : initialized_(false)
+
+FullCoveragePathPlanner::FullCoveragePathPlanner()
+: tf_(nullptr), costmap_(nullptr)
 {
 }
 
-void FullCoveragePathPlanner::publishPlan(const std::vector<geometry_msgs::PoseStamped>& path)
+FullCoveragePathPlanner::~FullCoveragePathPlanner()
 {
-  if (!initialized_)
-  {
-    ROS_ERROR("This planner has not been initialized yet, but it is being used, please call initialize() before use");
-    return;
-  }
-
-  // create a message for the plan
-  nav_msgs::Path gui_path;
-  gui_path.poses.resize(path.size());
-
-  if (!path.empty())
-  {
-    gui_path.header.frame_id = path[0].header.frame_id;
-    gui_path.header.stamp = path[0].header.stamp;
-  }
-
-  // Extract the plan in world co-ordinates, we assume the path is all in the same frame
-  for (unsigned int i = 0; i < path.size(); i++)
-  {
-    gui_path.poses[i] = path[i];
-  }
-
-  plan_pub_.publish(gui_path);
+  RCLCPP_INFO(
+    node_->get_logger(), "Destroying plugin %s of type FullCoveragePathPlanner",
+    name_.c_str());
 }
 
+void
+FullCoveragePathPlanner::configure(
+  rclcpp_lifecycle::LifecycleNode::SharedPtr parent,
+  std::string name, std::shared_ptr<tf2_ros::Buffer> tf,
+  std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap_ros)
+{
+  node_ = parent;
+  tf_ = tf;
+  name_ = name;
+  costmap_ = costmap_ros->getCostmap();
+  global_frame_ = costmap_ros->getGlobalFrameID();
+
+  RCLCPP_INFO(
+    node_->get_logger(), "Configuring plugin %s of type FullCoveragePathPlanner",
+    name_.c_str());
+
+  // Initialize parameters
+  // Declare this plugin's parameters
+  declare_parameter_if_not_declared(node_, name + ".tolerance", rclcpp::ParameterValue(0.5));
+  node_->get_parameter(name + ".tolerance", tolerance_);
+  declare_parameter_if_not_declared(node_, name + ".use_astar", rclcpp::ParameterValue(false));
+  node_->get_parameter(name + ".use_astar", use_astar_);
+  declare_parameter_if_not_declared(node_, name + ".allow_unknown", rclcpp::ParameterValue(true));
+  node_->get_parameter(name + ".allow_unknown", allow_unknown_);
+
+  // Create a planner based on the new costmap size
+  planner_ = std::make_unique<NavFn>(
+    costmap_->getSizeInCellsX(),
+    costmap_->getSizeInCellsY());
+}
+
+void
+FullCoveragePathPlanner::activate()
+{
+  RCLCPP_INFO(
+    node_->get_logger(), "Activating plugin %s of type FullCoveragePathPlanner",
+    name_.c_str());
+}
+
+void
+FullCoveragePathPlanner::deactivate()
+{
+  RCLCPP_INFO(
+    node_->get_logger(), "Deactivating plugin %s of type FullCoveragePathPlanner",
+    name_.c_str());
+}
+
+void
+FullCoveragePathPlanner::cleanup()
+{
+  RCLCPP_INFO(
+    node_->get_logger(), "Cleaning up plugin %s of type FullCoveragePathPlanner",
+    name_.c_str());
+  planner_.reset();
+}
+
+nav_msgs::msg::Path FullCoveragePathPlanner::createPlan(
+  const geometry_msgs::msg::PoseStamped & start,
+  const geometry_msgs::msg::PoseStamped & goal)
+{
+#ifdef BENCHMARK_TESTING
+  steady_clock::time_point a = steady_clock::now();
+#endif
+
+  RCLCPP_INFO(
+    node_->get_logger(), "createPlan");
+
+
+  // Update planner based on the new costmap size
+  if (isPlannerOutOfDate()) {
+    planner_->setNavArr(
+      costmap_->getSizeInCellsX(),
+      costmap_->getSizeInCellsY());
+  }
+
+  nav_msgs::msg::Path path;
+
+  if (!makePlan(start.pose, goal.pose, tolerance_, path)) {
+    RCLCPP_WARN(
+      node_->get_logger(), "%s: failed to create plan with "
+      "tolerance %.2f.", name_.c_str(), tolerance_);
+  }
+
+#ifdef BENCHMARK_TESTING
+  steady_clock::time_point b = steady_clock::now();
+  duration<double> time_span = duration_cast<duration<double>>(b - a);
+  std::cout << "It took " << time_span.count() * 1000 <<
+    " milliseconds with " << num_iterations << " iterations." << std::endl;
+#endif
+
+  return path;
+}
+
+bool
+FullCoveragePathPlanner::isPlannerOutOfDate()
+{
+  if (!planner_.get() ||
+    planner_->nx != static_cast<int>(costmap_->getSizeInCellsX()) ||
+    planner_->ny != static_cast<int>(costmap_->getSizeInCellsY()))
+  {
+    return true;
+  }
+  return false;
+}
+
+bool
+FullCoveragePathPlanner::makePlan(
+  const geometry_msgs::msg::Pose & start,
+  const geometry_msgs::msg::Pose & goal, double tolerance,
+  nav_msgs::msg::Path & plan)
+{
+  // clear the plan, just in case
+  plan.poses.clear();
+
+  plan.header.stamp = node_->now();
+  plan.header.frame_id = global_frame_;
+
+  // TODO(orduno): add checks for start and goal reference frame -- should be in global frame
+
+  double wx = start.position.x;
+  double wy = start.position.y;
+
+  RCLCPP_DEBUG(
+    node_->get_logger(), "Making plan from (%.2f,%.2f) to (%.2f,%.2f)",
+    start.position.x, start.position.y, goal.position.x, goal.position.y);
+
+  unsigned int mx, my;
+  if (!worldToMap(wx, wy, mx, my)) {
+    RCLCPP_WARN(
+      node_->get_logger(),
+      "Cannot create a plan: the robot's start position is off the global"
+      " costmap. Planning will always fail, are you sure"
+      " the robot has been properly localized?");
+    return false;
+  }
+
+  // clear the starting cell within the costmap because we know it can't be an obstacle
+  clearRobotCell(mx, my);
+
+  std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> lock(*(costmap_->getMutex()));
+
+  // make sure to resize the underlying array that Navfn uses
+  planner_->setNavArr(
+    costmap_->getSizeInCellsX(),
+    costmap_->getSizeInCellsY());
+
+  planner_->setCostmap(costmap_->getCharMap(), true, allow_unknown_);
+
+  lock.unlock();
+
+  int map_start[2];
+  map_start[0] = mx;
+  map_start[1] = my;
+
+  wx = goal.position.x;
+  wy = goal.position.y;
+
+  if (!worldToMap(wx, wy, mx, my)) {
+    RCLCPP_WARN(
+      node_->get_logger(),
+      "The goal sent to the planner is off the global costmap."
+      " Planning will always fail to this goal.");
+    return false;
+  }
+
+  int map_goal[2];
+  map_goal[0] = mx;
+  map_goal[1] = my;
+
+  // TODO(orduno): Explain why we are providing 'map_goal' to setStart().
+  //               Same for setGoal, seems reversed. Computing backwards?
+
+  planner_->setStart(map_goal);
+  planner_->setGoal(map_start);
+  if (use_astar_) {
+    planner_->calcNavFnAstar();
+  } else {
+    planner_->calcNavFnDijkstra(true);
+  }
+
+  double resolution = costmap_->getResolution();
+  geometry_msgs::msg::Pose p, best_pose;
+
+  bool found_legal = false;
+
+  p = goal;
+  double potential = getPointPotential(p.position);
+  if (potential < POT_HIGH) {
+    // Goal is reachable by itself
+    best_pose = p;
+    found_legal = true;
+  } else {
+    // Goal is not reachable. Trying to find nearest to the goal
+    // reachable point within its tolerance region
+    double best_sdist = std::numeric_limits<double>::max();
+
+    p.position.y = goal.position.y - tolerance;
+    while (p.position.y <= goal.position.y + tolerance) {
+      p.position.x = goal.position.x - tolerance;
+      while (p.position.x <= goal.position.x + tolerance) {
+        potential = getPointPotential(p.position);
+        double sdist = squared_distance(p, goal);
+        if (potential < POT_HIGH && sdist < best_sdist) {
+          best_sdist = sdist;
+          best_pose = p;
+          found_legal = true;
+        }
+        p.position.x += resolution;
+      }
+      p.position.y += resolution;
+    }
+  }
+
+  if (found_legal) {
+    // extract the plan
+    if (getPlanFromPotential(best_pose, plan)) {
+      smoothApproachToGoal(best_pose, plan);
+    } else {
+      RCLCPP_ERROR(
+        node_->get_logger(),
+        "Failed to create a plan from potential when a legal"
+        " potential was found. This shouldn't happen.");
+    }
+  }
+
+  return !plan.poses.empty();
+}
+
+void
+FullCoveragePathPlanner::smoothApproachToGoal(
+  const geometry_msgs::msg::Pose & goal,
+  nav_msgs::msg::Path & plan)
+{
+  // Replace the last pose of the computed path if it's actually further away
+  // to the second to last pose than the goal pose.
+  if (plan.poses.size() >= 2) {
+    auto second_to_last_pose = plan.poses.end()[-2];
+    auto last_pose = plan.poses.back();
+    if (
+      squared_distance(last_pose.pose, second_to_last_pose.pose) >
+      squared_distance(goal, second_to_last_pose.pose))
+    {
+      plan.poses.back().pose = goal;
+      return;
+    }
+  }
+  geometry_msgs::msg::PoseStamped goal_copy;
+  goal_copy.pose = goal;
+  plan.poses.push_back(goal_copy);
+}
+
+bool
+FullCoveragePathPlanner::getPlanFromPotential(
+  const geometry_msgs::msg::Pose & goal,
+  nav_msgs::msg::Path & plan)
+{
+  // clear the plan, just in case
+  plan.poses.clear();
+
+  // Goal should be in global frame
+  double wx = goal.position.x;
+  double wy = goal.position.y;
+
+  // the potential has already been computed, so we won't update our copy of the costmap
+  unsigned int mx, my;
+  if (!worldToMap(wx, wy, mx, my)) {
+    RCLCPP_WARN(
+      node_->get_logger(),
+      "The goal sent to the navfn planner is off the global costmap."
+      " Planning will always fail to this goal.");
+    return false;
+  }
+
+  int map_goal[2];
+  map_goal[0] = mx;
+  map_goal[1] = my;
+
+  planner_->setStart(map_goal);
+
+  const int & max_cycles = (costmap_->getSizeInCellsX() >= costmap_->getSizeInCellsY()) ?
+    (costmap_->getSizeInCellsX() * 4) : (costmap_->getSizeInCellsY() * 4);
+
+  int path_len = planner_->calcPath(max_cycles);
+  if (path_len == 0) {
+    return false;
+  }
+
+  auto cost = planner_->getLastPathCost();
+  RCLCPP_DEBUG(node_->get_logger(), "Path found, %d steps, %f cost\n", path_len, cost);
+
+  // extract the plan
+  float * x = planner_->getPathX();
+  float * y = planner_->getPathY();
+  int len = planner_->getPathLen();
+
+  for (int i = len - 1; i >= 0; --i) {
+    // convert the plan to world coordinates
+    double world_x, world_y;
+    mapToWorld(x[i], y[i], world_x, world_y);
+
+    geometry_msgs::msg::PoseStamped pose;
+    pose.pose.position.x = world_x;
+    pose.pose.position.y = world_y;
+    pose.pose.position.z = 0.0;
+    pose.pose.orientation.x = 0.0;
+    pose.pose.orientation.y = 0.0;
+    pose.pose.orientation.z = 0.0;
+    pose.pose.orientation.w = 1.0;
+    plan.poses.push_back(pose);
+  }
+
+  return !plan.poses.empty();
+}
+
+double
+FullCoveragePathPlanner::getPointPotential(const geometry_msgs::msg::Point & world_point)
+{
+  unsigned int mx, my;
+  if (!worldToMap(world_point.x, world_point.y, mx, my)) {
+    return std::numeric_limits<double>::max();
+  }
+
+  unsigned int index = my * planner_->nx + mx;
+  return planner_->potarr[index];
+}
+
+// bool
+// FullCoveragePathPlanner::validPointPotential(const geometry_msgs::msg::Point & world_point)
+// {
+//   return validPointPotential(world_point, tolerance_);
+// }
+
+// bool
+// FullCoveragePathPlanner::validPointPotential(
+//   const geometry_msgs::msg::Point & world_point, double tolerance)
+// {
+//   const double resolution = costmap_->getResolution();
+
+//   geometry_msgs::msg::Point p = world_point;
+//   double potential = getPointPotential(p);
+//   if (potential < POT_HIGH) {
+//     // world_point is reachable by itself
+//     return true;
+//   } else {
+//     // world_point, is not reachable. Trying to find any
+//     // reachable point within its tolerance region
+//     p.y = world_point.y - tolerance;
+//     while (p.y <= world_point.y + tolerance) {
+//       p.x = world_point.x - tolerance;
+//       while (p.x <= world_point.x + tolerance) {
+//         potential = getPointPotential(p);
+//         if (potential < POT_HIGH) {
+//           return true;
+//         }
+//         p.x += resolution;
+//       }
+//       p.y += resolution;
+//     }
+//   }
+
+//   return false;
+// }
+
+bool
+FullCoveragePathPlanner::worldToMap(double wx, double wy, unsigned int & mx, unsigned int & my)
+{
+  if (wx < costmap_->getOriginX() || wy < costmap_->getOriginY()) {
+    return false;
+  }
+
+  mx = static_cast<int>(
+    std::round((wx - costmap_->getOriginX()) / costmap_->getResolution()));
+  my = static_cast<int>(
+    std::round((wy - costmap_->getOriginY()) / costmap_->getResolution()));
+
+  if (mx < costmap_->getSizeInCellsX() && my < costmap_->getSizeInCellsY()) {
+    return true;
+  }
+
+  RCLCPP_ERROR(
+    node_->get_logger(), "worldToMap failed: mx,my: %d,%d, size_x,size_y: %d,%d", mx, my,
+    costmap_->getSizeInCellsX(), costmap_->getSizeInCellsY());
+
+  return false;
+}
+
+void
+FullCoveragePathPlanner::mapToWorld(double mx, double my, double & wx, double & wy)
+{
+  wx = costmap_->getOriginX() + mx * costmap_->getResolution();
+  wy = costmap_->getOriginY() + my * costmap_->getResolution();
+}
+
+void
+FullCoveragePathPlanner::clearRobotCell(unsigned int mx, unsigned int my)
+{
+  // TODO(orduno): check usage of this function, might instead be a request to
+  //               world_model / map server
+  costmap_->setCost(mx, my, nav2_costmap_2d::FREE_SPACE);
+}
+
+#if 0
 void FullCoveragePathPlanner::parsePointlist2Plan(const geometry_msgs::PoseStamped& start,
     std::list<Point_t> const& goalpoints,
     std::vector<geometry_msgs::PoseStamped>& plan)
 {
-  geometry_msgs::PoseStamped new_goal;
-  std::list<Point_t>::const_iterator it, it_next, it_prev;
-  int dx_now, dy_now, dx_next, dy_next, move_dir_now = 0, move_dir_prev = 0, move_dir_next = 0;
-  bool do_publish = false;
-  float orientation = eDirNone;
-  ROS_INFO("Received goalpoints with length: %lu", goalpoints.size());
-  if (goalpoints.size() > 1)
-  {
-    for (it = goalpoints.begin(); it != goalpoints.end(); ++it)
-    {
-      it_next = it;
-      it_next++;
-      it_prev = it;
-      it_prev--;
-
-      // Check for the direction of movement
-      if (it == goalpoints.begin())
-      {
-        dx_now = it_next->x - it->x;
-        dy_now = it_next->y - it->y;
-      }
-      else
-      {
-        dx_now = it->x - it_prev->x;
-        dy_now = it->y - it_prev->y;
-        dx_next = it_next->x - it->x;
-        dy_next = it_next->y - it->y;
-      }
-
-      // Calculate direction enum: dx + dy*2 will give a unique number for each of the four possible directions because
-      // of their signs:
-      //  1 +  0*2 =  1
-      //  0 +  1*2 =  2
-      // -1 +  0*2 = -1
-      //  0 + -1*2 = -2
-      move_dir_now = dx_now + dy_now * 2;
-      move_dir_next = dx_next + dy_next * 2;
-
-      // Check if this points needs to be published (i.e. a change of direction or first or last point in list)
-      do_publish = move_dir_next != move_dir_now || it == goalpoints.begin() ||
-                   (it != goalpoints.end() && it == --goalpoints.end());
-      move_dir_prev = move_dir_now;
-
-      // Add to vector if required
-      if (do_publish)
-      {
-        new_goal.header.frame_id = "map";
-        new_goal.pose.position.x = (it->x) * tile_size_ + grid_origin_.x + tile_size_ * 0.5;
-        new_goal.pose.position.y = (it->y) * tile_size_ + grid_origin_.y + tile_size_ * 0.5;
-        // Calculate desired orientation to be in line with movement direction
-        switch (move_dir_now)
-        {
-        case eDirNone:
-          // Keep orientation
-          break;
-        case eDirRight:
-          orientation = 0;
-          break;
-        case eDirUp:
-          orientation = M_PI / 2;
-          break;
-        case eDirLeft:
-          orientation = M_PI;
-          break;
-        case eDirDown:
-          orientation = M_PI * 1.5;
-          break;
-        }
-        new_goal.pose.orientation = tf::createQuaternionMsgFromYaw(orientation);
-        if (it != goalpoints.begin())
-        {
-          previous_goal_.pose.orientation = new_goal.pose.orientation;
-          // republish previous goal but with new orientation to indicate change of direction
-          // useful when the plan is strictly followed with base_link
-          plan.push_back(previous_goal_);
-        }
-        ROS_DEBUG("Voila new point: x=%f, y=%f, o=%f,%f,%f,%f", new_goal.pose.position.x, new_goal.pose.position.y,
-                  new_goal.pose.orientation.x, new_goal.pose.orientation.y, new_goal.pose.orientation.z,
-                  new_goal.pose.orientation.w);
-        plan.push_back(new_goal);
-        previous_goal_ = new_goal;
-      }
-    }
-  }
-  else
-  {
-    new_goal.header.frame_id = "map";
-    new_goal.pose.position.x = (goalpoints.begin()->x) * tile_size_ + grid_origin_.x + tile_size_ * 0.5;
-    new_goal.pose.position.y = (goalpoints.begin()->y) * tile_size_ + grid_origin_.y + tile_size_ * 0.5;
-    new_goal.pose.orientation = tf::createQuaternionMsgFromYaw(0);
-    plan.push_back(new_goal);
-  }
-  /* Add poses from current position to start of plan */
-
-  // Compute angle between current pose and first plan point
-  double dy = plan.begin()->pose.position.y - start.pose.position.y;
-  double dx = plan.begin()->pose.position.x - start.pose.position.x;
-  // Arbitrary choice of 100.0*FLT_EPSILON to determine minimum angle precision of 1%
-  if (!(fabs(dy) < 100.0 * FLT_EPSILON && fabs(dx) < 100.0 * FLT_EPSILON))
-  {
-    // Add extra translation waypoint
-    double yaw = std::atan2(dy, dx);
-    geometry_msgs::Quaternion quat_temp = tf::createQuaternionMsgFromYaw(yaw);
-    geometry_msgs::PoseStamped extra_pose;
-    extra_pose = *plan.begin();
-    extra_pose.pose.orientation = quat_temp;
-    plan.insert(plan.begin(), extra_pose);
-    extra_pose = start;
-    extra_pose.pose.orientation = quat_temp;
-    plan.insert(plan.begin(), extra_pose);
-  }
-
-  // Insert current pose
-  plan.insert(plan.begin(), start);
-
-  ROS_INFO("Plan ready containing %lu goals!", plan.size());
-}
-
-bool FullCoveragePathPlanner::parseGrid(nav_msgs::OccupancyGrid const& cpp_grid_,
-                                        std::vector<std::vector<bool> >& grid,
-                                        float robotRadius,
-                                        float toolRadius,
-                                        geometry_msgs::PoseStamped const& realStart,
-                                        Point_t& scaledStart)
-{
-  int ix, iy, nodeRow, nodeColl;
-  uint32_t nodeSize = dmax(floor(toolRadius / cpp_grid_.info.resolution), 1);  // Size of node in pixels/units
-  uint32_t robotNodeSize = dmax(floor(robotRadius / cpp_grid_.info.resolution), 1);  // RobotRadius in pixels/units
-  uint32_t nRows = cpp_grid_.info.height, nCols = cpp_grid_.info.width;
-  ROS_INFO("nRows: %u nCols: %u nodeSize: %d", nRows, nCols, nodeSize);
-
-  if (nRows == 0 || nCols == 0)
-  {
-    return false;
-  }
-
-  // Save map origin and scaling
-  tile_size_ = nodeSize * cpp_grid_.info.resolution;  // Size of a tile in meters
-  grid_origin_.x = cpp_grid_.info.origin.position.x;  // x-origin in meters
-  grid_origin_.y = cpp_grid_.info.origin.position.y;  // y-origin in meters
-
-  // Scale starting point
-  scaledStart.x = static_cast<unsigned int>(clamp((realStart.pose.position.x - grid_origin_.x) / tile_size_, 0.0,
-                             floor(cpp_grid_.info.width / tile_size_)));
-  scaledStart.y = static_cast<unsigned int>(clamp((realStart.pose.position.y - grid_origin_.y) / tile_size_, 0.0,
-                             floor(cpp_grid_.info.height / tile_size_)));
-
-  // Scale grid
-  for (iy = 0; iy < nRows; iy = iy + nodeSize)
-  {
-    std::vector<bool> gridRow;
-    for (ix = 0; ix < nCols; ix = ix + nodeSize)
-    {
-      bool nodeOccupied = false;
-      for (nodeRow = 0; (nodeRow < robotNodeSize) && ((iy + nodeRow) < nRows) && (nodeOccupied == false); ++nodeRow)
-      {
-        for (nodeColl = 0; (nodeColl < robotNodeSize) && ((ix + nodeColl) < nCols); ++nodeColl)
-        {
-          int index_grid = dmax((iy + nodeRow - ceil(static_cast<float>(robotNodeSize - nodeSize) / 2.0))
-                            * nCols + (ix + nodeColl - ceil(static_cast<float>(robotNodeSize - nodeSize) / 2.0)), 0);
-          if (cpp_grid_.data[index_grid] > 65)
-          {
-            nodeOccupied = true;
-            break;
-          }
-        }
-      }
-      gridRow.push_back(nodeOccupied);
-    }
-    grid.push_back(gridRow);
-  }
-  return true;
-}
+    (void)start;
+    (void)goalpoints;
+    (void)plan;
 }  // namespace full_coverage_path_planner
+#endif
+
+}
+
+#include "pluginlib/class_list_macros.hpp"
+PLUGINLIB_EXPORT_CLASS(full_coverage_path_planner::FullCoveragePathPlanner, nav2_core::GlobalPlanner)

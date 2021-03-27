@@ -8,31 +8,33 @@
 #include <vector>
 
 #include "full_coverage_path_planner/spiral_stc.h"
-#include <pluginlib/class_list_macros.h>
+//#include <pluginlib/class_list_macros.h>
 
-// register this planner as a BaseGlobalPlanner plugin
-PLUGINLIB_EXPORT_CLASS(full_coverage_path_planner::SpiralSTC, nav_core::BaseGlobalPlanner)
+// register this planner as a GlobalPlanner plugin
+//PLUGINLIB_EXPORT_CLASS(full_coverage_path_planner::SpiralSTC, nav2_core::GlobalPlanner)
 
 namespace full_coverage_path_planner
 {
-void SpiralSTC::initialize(std::string name, costmap_2d::Costmap2DROS* costmap_ros)
+void SpiralSTC::initialize(std::string name, nav2_costmap_2d::Costmap2DROS* costmap_ros)
 {
+    (void) name;
+    (void) costmap_ros;
   if (!initialized_)
   {
     // Create a publisher to visualize the plan
-    ros::NodeHandle private_nh("~/");
-    ros::NodeHandle nh, private_named_nh("~/" + name);
+    //TODOros::NodeHandle private_nh("~/");
+    //TODOros::NodeHandle nh, private_named_nh("~/" + name);
 
-    plan_pub_ = private_named_nh.advertise<nav_msgs::Path>("plan", 1);
+    //TODO plan_pub_ = private_named_nh.advertise<nav_msgs::Path>("plan", 1);
     // Try to request the cpp-grid from the cpp_grid map_server
-    cpp_grid_client_ = nh.serviceClient<nav_msgs::GetMap>("static_map");
+    //TODO cpp_grid_client_ = nh.serviceClient<nav_msgs::GetMap>("static_map");
 
     // Define  robot radius (radius) parameter
-    float robot_radius_default = 0.5f;
-    private_named_nh.param<float>("robot_radius", robot_radius_, robot_radius_default);
+    //TODO float robot_radius_default = 0.5f;
+    //TODO private_named_nh.param<float>("robot_radius", robot_radius_, robot_radius_default);
     // Define  tool radius (radius) parameter
-    float tool_radius_default = 0.5f;
-    private_named_nh.param<float>("tool_radius", tool_radius_, tool_radius_default);
+    //TODO float tool_radius_default = 0.5f;
+    //TODO private_named_nh.param<float>("tool_radius", tool_radius_, tool_radius_default);
     initialized_ = true;
   }
 }
@@ -99,6 +101,7 @@ std::list<gridNode_t> SpiralSTC::spiral(std::vector<std::vector<bool> > const& g
       dy = -dx_prev;
     }
   }
+  (void)i;
   return pathNodes;
 }
 
@@ -208,6 +211,8 @@ std::list<Point_t> SpiralSTC::spiral_stc(std::vector<std::vector<bool> > const& 
     }
   }
 
+    (void)nRows;
+    (void)nCols;
   return fullPath;
 }
 
@@ -231,6 +236,7 @@ bool SpiralSTC::makePlan(const geometry_msgs::PoseStamped& start, const geometry
   std::vector<std::vector<bool> > grid;
   nav_msgs::GetMap grid_req_srv;
   ROS_INFO("Requesting grid!!");
+#if 0
   if (!cpp_grid_client_.call(grid_req_srv))
   {
     ROS_ERROR("Could not retrieve grid from map_server");
@@ -242,6 +248,10 @@ bool SpiralSTC::makePlan(const geometry_msgs::PoseStamped& start, const geometry
     ROS_ERROR("Could not parse retrieved grid");
     return false;
   }
+#endif
+    (void)start;
+    (void)goal;
+    (void)plan;
 
 #ifdef DEBUG_PLOT
   ROS_INFO("Start grid is:");
@@ -257,7 +267,7 @@ bool SpiralSTC::makePlan(const geometry_msgs::PoseStamped& start, const geometry
   ROS_INFO("naive cpp completed!");
   ROS_INFO("Converting path to plan");
 
-  parsePointlist2Plan(start, goalPoints, plan);
+  //parsePointlist2Plan(start, goalPoints, plan);
   // Print some metrics:
   spiral_cpp_metrics_.accessible_counter = spiral_cpp_metrics_.visited_counter
                                             - spiral_cpp_metrics_.multiple_pass_counter;
@@ -271,7 +281,7 @@ bool SpiralSTC::makePlan(const geometry_msgs::PoseStamped& start, const geometry
   // (also controlled by planner_frequency parameter in move_base namespace)
 
   ROS_INFO("Publishing plan!");
-  publishPlan(plan);
+//  publishPlan(plan);
   ROS_INFO("Plan published!");
   ROS_DEBUG("Plan published");
 

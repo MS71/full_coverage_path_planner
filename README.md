@@ -1,8 +1,8 @@
-# Full Coverage Path Planner (FCPP)
+# ROS2 version of Full Coverage Path Planner (FullCoveragePathPlanner)
 
 ## Overview
 
-This package provides an implementation of a Full Coverage Path Planner (FCPP) using the Backtracking Spiral Algorithm (BSA), see [1].
+This package provides an implementation of a Full Coverage Path Planner (FullCoveragePathPlanner) using the Backtracking Spiral Algorithm (BSA), see [1].
 
 This packages acts as a global planner plugin to the Move Base package (http://wiki.ros.org/move_base).
 

@@ -1,80 +1,83 @@
-cmake_minimum_required(VERSION 3.0.2)
+cmake_minimum_required(VERSION 3.5)
 project(full_coverage_path_planner)
-add_compile_options(-std=c++11)
 
-find_package(catkin REQUIRED
-        COMPONENTS
-            base_local_planner
-            costmap_2d
-            nav_core
-            pluginlib
-            roscpp
-            roslint
-            rostest
-            tf
-        )
+find_package(ament_cmake REQUIRED)
+find_package(nav2_common REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(rclcpp_action REQUIRED)
+find_package(rclcpp_lifecycle REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
+find_package(nav2_util REQUIRED)
+find_package(nav2_core REQUIRED)
+find_package(nav2_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(builtin_interfaces REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(nav2_costmap_2d REQUIRED)
+find_package(pluginlib REQUIRED)
+
+nav2_package()
 
 include_directories(
-    include
-    test/include
-    ${catkin_INCLUDE_DIRS}
-    )
-add_definitions(${EIGEN3_DEFINITIONS})
-
-catkin_package(
-    INCLUDE_DIRS include
-    LIBRARIES ${PROJECT_NAME}
-    CATKIN_DEPENDS
-        base_local_planner
-        costmap_2d
-        nav_core
-        pluginlib
-        roscpp
+  include
 )
 
-add_library(${PROJECT_NAME}
-        src/common.cpp
-        src/${PROJECT_NAME}.cpp
-        src/spiral_stc.cpp
-        )
-add_dependencies(${PROJECT_NAME} ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-target_link_libraries(${PROJECT_NAME}
-    ${catkin_LIBRARIES}
-    )
+set(library_name full_coverage_path_planner)
 
-install(TARGETS
-            ${PROJECT_NAME}
-       ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-       LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-       )
-
-install(DIRECTORY include/${PROJECT_NAME}
-  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
+set(dependencies
+  rclcpp
+  rclcpp_action
+  rclcpp_lifecycle
+  std_msgs
+  visualization_msgs
+  nav2_util
+  nav2_msgs
+  nav_msgs
+  geometry_msgs
+  builtin_interfaces
+  tf2_ros
+  nav2_costmap_2d
+  nav2_core
+  pluginlib
 )
 
-install(FILES fcpp_plugin.xml
-    DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+add_library(${library_name} SHARED
+  src/full_coverage_path_planner.cpp
+  src/navfn.cpp
+  src/spiral_stc.cpp
 )
 
-catkin_install_python(
-  PROGRAMS
-    nodes/coverage_progress
-  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+ament_target_dependencies(${library_name}
+  ${dependencies}
 )
 
-if (CATKIN_ENABLE_TESTING)
-    catkin_add_gtest(test_common test/src/test_common.cpp test/src/util.cpp src/common.cpp)
+# prevent pluginlib from using boost
+target_compile_definitions(${library_name} PUBLIC "PLUGINLIB__DISABLE_BOOST_FUNCTIONS")
 
-    catkin_add_gtest(test_spiral_stc test/src/test_spiral_stc.cpp test/src/util.cpp src/spiral_stc.cpp src/common.cpp src/${PROJECT_NAME}.cpp)
-    add_dependencies(test_spiral_stc ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-    target_link_libraries(test_spiral_stc ${catkin_LIBRARIES})
+pluginlib_export_plugin_description_file(nav2_core global_planner_plugin.xml)
 
-    find_package(OpenCV)
-    include_directories(${OpenCV_INCLUDE_DIRS})
-    target_link_libraries(test_spiral_stc ${OpenCV_LIBRARIES})
+install(TARGETS ${library_name}
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+)
 
-    add_rostest(test/${PROJECT_NAME}/test_${PROJECT_NAME}.test)
+install(DIRECTORY include/
+  DESTINATION include/
+)
 
+install(FILES global_planner_plugin.xml
+  DESTINATION share/${PROJECT_NAME}
+)
+
+if(BUILD_TESTING)
+  find_package(ament_lint_auto REQUIRED)
+  ament_lint_auto_find_test_dependencies()
 endif()
 
-roslint_cpp()
+ament_export_include_directories(include)
+ament_export_libraries(${library_name})
+ament_export_dependencies(${dependencies})
+ament_package()
