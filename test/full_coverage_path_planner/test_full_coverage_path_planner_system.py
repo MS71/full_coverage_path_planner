@@ -19,7 +19,7 @@ class TestTrackingPID(unittest.TestCase):
     def setUp(self):
         rospy.init_node("rostest_tracking_pid_node")
         self.trajectory_finished_sub = rospy.Subscriber("trajectory_finished", Bool,
-                                                        self.trajectory_finished_callback, queue_size=1)
+            self.trajectory_finished_callback, queue_size=1)
         self.listener = tf.TransformListener()
         self.trajectory_finished = False
 

@@ -28,7 +28,7 @@ from launch_testing.legacy import LaunchTestService
 
 from nav2_common.launch import RewrittenYaml
 
-def xxx_generate_launch_description():
+def generate_launch_description():
     map_yaml_file = os.getenv('TEST_MAP')
     world = os.getenv('TEST_WORLD')
 
@@ -83,21 +83,20 @@ def xxx_generate_launch_description():
                               'autostart': 'True'}.items()),
     ])
 
-def generate_launch_description():
-    return LaunchDescription([
-    ])
+def yyy_generate_launch_description():
+    return LaunchDescription()
 
 def main(argv=sys.argv[1:]):
     ld = generate_launch_description()
 
     test1_action = ExecuteProcess(
-        cmd=[os.path.join(os.getenv('TEST_DIR'), 'test_full_coverage_path_planner_system.py'),
+        cmd=[os.path.join(os.getenv('TEST_DIR'), 'full_coverage_path_planner/test_full_coverage_path_planner_system.py'),
              '-r', '-2.0', '-0.5', '0.0', '2.0'],
         name='test_full_coverage_path_planner_system.py',
         output='screen')
 
     lts = LaunchTestService()
-    lts.add_test_action(ld, test1_action)
+    #lts.add_test_action(ld, test1_action)
     ls = LaunchService(argv=argv)
     ls.include_launch_description(ld)
     return lts.run(ls)

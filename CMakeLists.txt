@@ -93,19 +93,19 @@ if(BUILD_TESTING)
 
     #add_rostest(test/${PROJECT_NAME}/test_${PROJECT_NAME}.test)
     
-#    ament_add_test(test_full_coverage_path_planner
-#      GENERATE_RESULT_FOR_RETURN_CODE_ZERO
-#      COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/test/full_coverage_path_planner/test_full_coverage_path_planner_launch.py"
-#      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/test/full_coverage_path_planner"
-#      TIMEOUT 180
-#      ENV
-#        TEST_DIR=${CMAKE_CURRENT_SOURCE_DIR}
-#        TEST_MAP=${PROJECT_SOURCE_DIR}/maps/map_circular.yaml
-#        TEST_WORLD=${PROJECT_SOURCE_DIR}/worlds/turtlebot3_ros2_demo.world
-#        GAZEBO_MODEL_PATH=${PROJECT_SOURCE_DIR}/models
-#        BT_NAVIGATOR_XML=navigate_w_replanning_and_recovery.xml
-#        ASTAR=False
-#    )
+    ament_add_test(system_test_full_coverage_path_planner
+      GENERATE_RESULT_FOR_RETURN_CODE_ZERO
+      COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/test/full_coverage_path_planner/test_full_coverage_path_planner_launch.py"
+      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/test/full_coverage_path_planner"
+      TIMEOUT 180
+      ENV
+        TEST_DIR=${CMAKE_CURRENT_SOURCE_DIR}/test
+        TEST_MAP=${PROJECT_SOURCE_DIR}/maps/map_circular.yaml
+        TEST_WORLD=${PROJECT_SOURCE_DIR}/worlds/turtlebot3_ros2_demo.world
+        GAZEBO_MODEL_PATH=${PROJECT_SOURCE_DIR}/models
+        BT_NAVIGATOR_XML=navigate_w_replanning_and_recovery.xml
+        ASTAR=False
+    )
 
 endif()
 
